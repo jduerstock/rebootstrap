@@ -994,6 +994,120 @@ patch_gcc_include_multiarch() {
 
 EOF
 }
+patch_gcc_ia64() {
+	test "$HOST_ARCH" = ia64 || return 0
+	echo "patching gcc for ia64"
+	drop_privs patch -p1 <<'EOF'
+--- gcc-7-7.2.0/debian/control
++++ gcc-7-7.2.0/debian/control
+@@ -9,7 +9,7 @@
+   libc6.1-dev (>= 2.13-5) [alpha ia64] | libc0.3-dev (>= 2.13-5) [hurd-i386] | libc0.1-dev (>= 2.13-5) [kfreebsd-i386 kfreebsd-amd64] | libc6-dev (>= 2.13-5), libc6-dev (>= 2.13-31) [armel armhf], libc6-dev-amd64 [i386 x32], libc6-dev-sparc64 [sparc], libc6-dev-sparc [sparc64], libc6-dev-s390 [s390x], libc6-dev-s390x [s390], libc6-dev-i386 [amd64 x32], libc6-dev-powerpc [ppc64], libc6-dev-ppc64 [powerpc], libc0.1-dev-i386 [kfreebsd-amd64], lib32gcc1 [amd64 ppc64 kfreebsd-amd64 mipsn32 mipsn32el mips64 mips64el s390x sparc64 x32], libn32gcc1 [mips mipsel mips64 mips64el], lib64gcc1 [i386 mips mipsel mipsn32 mipsn32el powerpc sparc s390 x32], libc6-dev-mips64 [mips mipsel mipsn32 mipsn32el], libc6-dev-mipsn32 [mips mipsel mips64 mips64el], libc6-dev-mips32 [mipsn32 mipsn32el mips64 mips64el], libc6-dev-x32 [amd64 i386], libx32gcc1 [amd64 i386], libc6.1-dbg [alpha ia64] | libc0.3-dbg [hurd-i386] | libc0.1-dbg [kfreebsd-i386 kfreebsd-amd64] | libc6-dbg, 
+   kfreebsd-kernel-headers (>= 0.84) [kfreebsd-any], linux-libc-dev [m68k], 
+   m4, libtool, autoconf2.64, 
+-  libunwind7-dev (>= 0.98.5-6) [ia64], libatomic-ops-dev [ia64], 
++  libunwind8-dev [ia64], libatomic-ops-dev [ia64], 
+   autogen <!nocheck>, gawk, lzma, xz-utils, patchutils, 
+   zlib1g-dev, systemtap-sdt-dev [linux-any kfreebsd-any hurd-any], 
+   binutils:native (>= 2.29.1) | binutils-multiarch:native (>= 2.29.1), binutils-hppa64-linux-gnu:native (>= 2.29.1) [hppa amd64 i386 x32], 
+diff -u gcc-7-7.2.0/debian/control.m4 gcc-7-7.2.0/debian/control.m4
+--- gcc-7-7.2.0/debian/control.m4
++++ gcc-7-7.2.0/debian/control.m4
+@@ -74,7 +74,7 @@
+   LIBC_BUILD_DEP, LIBC_BIARCH_BUILD_DEP LIBC_DBG_DEP
+   kfreebsd-kernel-headers (>= 0.84) [kfreebsd-any], linux-libc-dev [m68k],
+   AUTO_BUILD_DEP BASE_BUILD_DEP
+-  libunwind7-dev (>= 0.98.5-6) [ia64], libatomic-ops-dev [ia64],
++  libunwind8-dev [ia64], libatomic-ops-dev [ia64],
+   autogen <!nocheck>, gawk, lzma, xz-utils, patchutils,
+   zlib1g-dev, SDT_BUILD_DEP
+   BINUTILS_BUILD_DEP,
+diff -u gcc-7-7.2.0/debian/rules.conf gcc-7-7.2.0/debian/rules.conf
+--- gcc-7-7.2.0/debian/rules.conf
++++ gcc-7-7.2.0/debian/rules.conf
+@@ -373,11 +373,13 @@
+   GCC_MULTILIB_BUILD_DEP = g++-multilib [$(multilib_archs)]$(pf_ncross),
+ endif
+ 
+-LIBUNWIND_DEV_DEP := libunwind7-dev$(LS)$(AQ) (>= 0.98.5-6)
++LIBUNWIND_DEV_DEP := libunwind8-dev$(LS)$(AQ)
+ LIBUNWIND_BUILD_DEP := $(LIBUNWIND_DEV_DEP) [ia64],
+ LIBATOMIC_OPS_BUILD_DEP := libatomic-ops-dev$(LS) [ia64],
+ ifneq ($(DEB_TARGET_ARCH),ia64)
+   LIBUNWIND_DEV_DEP := # nothing
++else ifneq (,$(filter $(DEB_STAGE),stage1 stage2))
++  LIBUNWIND_DEV_DEP := # nothing
+ endif
+ 
+ ifneq (,$(filter $(distrelease),lenny etch squeeze dapper hardy jaunty karmic lucid maverick natty))
+diff -u gcc-7-7.2.0/debian/rules.d/binary-libgcc.mk gcc-7-7.2.0/debian/rules.d/binary-libgcc.mk
+--- gcc-7-7.2.0/debian/rules.d/binary-libgcc.mk
++++ gcc-7-7.2.0/debian/rules.d/binary-libgcc.mk
+@@ -150,6 +150,12 @@
+ d_lsfgccdbg	= debian/$(p_lsfgccdbg)
+ d_lsfgccdev	= debian/$(p_lsfgccdev)
+ 
++# stage1 and stage2 builds use the internal libunwind
++GCC_LIBUNWIND_SONAME = 7
++ifneq (,$(and $(filter $(DEB_STAGE),stage2), $(filter $(DEB_TARGET_ARCH), ia64)))
++  with_gcc_libunwind = yes
++endif
++
+ # __do_gcc_devels(flavour,package,todir,fromdir)
+ define __do_gcc_devels
+ 	dh_testdir
+@@ -192,8 +198,23 @@
+ 		$(if $(1), $(for_target) dh_link -p$(2) /$(3)/libgcc_s.so \
+ 		    /$(gcc_lib_dir)/libgcc_s_$(1).so;)
+ 	)
++	$(if $(filter yes, $(with_gcc_libunwind)),
++		set -e; \
++		if [ -h $(4)/libunwind.so ]; then \
++		  rm -f $(4)/libunwind.so; \
++		  $(for_target) dh_link -p$(2) /$(libgcc_dir$(1))/libunwind.so.$(GCC_LIBUNWIND_SONAME) \
++		    /$(3)/libunwind.so; \
++		else \
++		  mv $(4)/libunwind.so $(d)/$(3)/libunwind.so; \
++		  $(for_target) dh_link -p$(2) /$(libgcc_dir$(1))/libunwind.so.$(GCC_LIBUNWIND_SONAME) \
++		    /$(3)/libunwind.so.$(GCC_LIBUNWIND_SONAME); \
++		fi; \
++		$(if $(1), $(for_target) dh_link -p$(2) /$(3)/libunwind.so \
++		    /$(gcc_lib_dir)/libunwind_$(1).so;)
++	)
+ 	$(for_target) $(dh_compat2) dh_movefiles -p$(2) \
+ 		$(3)/{libgcc*,libgcov.a,*.o} \
++		$(if $(filter yes, $(with_gcc_libunwind)),$(3)/libunwind*) \
+ 		$(if $(1),,$(header_files)) # Only move headers for the "main" package
+ 
+ 	: # libbacktrace not installed by default
+@@ -289,6 +310,10 @@
+ 		mv $(d)/$(usr_lib$(2))/libgcc_s.so.$(GCC_SONAME) \
+ 			$(d_l)/$(libgcc_dir$(2))/.
+ 	)
++	$(if $(filter yes, $(with_gcc_libunwind)),
++		mv $(d)/$(usr_lib$(2))/libunwind.so.$(GCC_LIBUNWIND_SONAME) \
++			$(d_l)/$(libgcc_dir$(2))/.
++	)
+ 
+ 	debian/dh_doclink -p$(p_l) $(if $(3),$(3),$(p_lbase))
+ 	debian/dh_doclink -p$(p_d) $(if $(3),$(3),$(p_lbase))
+diff -u gcc-7-7.2.0/debian/rules2 gcc-7-7.2.0/debian/rules2
+--- gcc-7-7.2.0/debian/rules2
++++ gcc-7-7.2.0/debian/rules2
+@@ -487,8 +487,10 @@
+   endif
+ endif
+ 
+-ifneq (,$(findstring ia64-linux,$(DEB_TARGET_GNU_TYPE)))
+-  CONFARGS += --with-system-libunwind
++ifeq (,$(filter $(DEB_STAGE),stage1 stage2))
++  ifneq (,$(findstring ia64-linux,$(DEB_TARGET_GNU_TYPE)))
++    CONFARGS += --with-system-libunwind
++  endif
+ endif
+ 
+ ifneq (,$(findstring sh4-linux,$(DEB_TARGET_GNU_TYPE)))
+EOF
+}
 patch_gcc_powerpcel() {
 	test "$HOST_ARCH" = powerpcel || return 0
 	echo "patching gcc for powerpcel"
@@ -1963,6 +2077,7 @@ EOF
 	patch_gcc_strict_debhelper_p
 	patch_gcc_debhelper_skip_profile
 	patch_gcc_wdotap
+	patch_gcc_ia64
 }
 patch_gcc_8() {
 	echo "patching gcc-8 to support building without binutils-multiarch #804190"
@@ -2260,6 +2375,7 @@ patch_gcc_8() {
 EOF
 	patch_gcc_debhelper_skip_profile
 	patch_gcc_wdotap
+	patch_gcc_ia64
 }
 # choosing libatomic1 arbitrarily here, cause it never bumped soname
 BUILD_GCC_MULTIARCH_VER=`apt-cache show --no-all-versions libatomic1 | sed 's/^Source: gcc-\([0-9.]*\)$/\1/;t;d'`
@@ -2447,7 +2563,7 @@ patch_linux() {
 	kernel_arch=
 	comment="just building headers yet"
 	case "$HOST_ARCH" in
-		arm|nios2)
+		arm|nios2|ia64)
 			kernel_arch=$HOST_ARCH
 		;;
 		arm64ilp32) kernel_arch=arm64; ;;
@@ -3013,6 +3129,7 @@ else
 	if ! test -f test.o; then echo "stage2 gcc fails to create binaries"; exit 1; fi
 	check_arch test.o "$HOST_ARCH"
 	touch "$REPODIR/stamps/gcc_2"
+	for f in *.deb; do echo "$f:"; dpkg-deb -c $f; done
 	cd ..
 	drop_privs rm -Rf gcc2
 fi
@@ -4010,6 +4127,21 @@ add_automatic libbsd
 
 add_automatic libcap2
 patch_libcap2() {
+	echo "fixing libcap2 ftbfs with gperf 3.1 #869588"
+	drop_privs quilt pop -a
+	drop_privs patch -p1 <<'EOF'
+--- libcap2-2.25/debian/patches/Hide-private-symbols.patch
++++ libcap2-2.25/debian/patches/Hide-private-symbols.patch
+@@ -22,7 +26,7 @@
+  
+  $(GPERF_OUTPUT): cap_names.list.h
+ -	perl -e 'print "struct __cap_token_s { const char *name; int index; };\n%{\nconst struct __cap_token_s *__cap_lookup_name(const char *, unsigned int);\n%}\n%%\n"; while ($$l = <>) { $$l =~ s/[\{\"]//g; $$l =~ s/\}.*// ; print $$l; }' < $< | gperf --ignore-case --language=ANSI-C --readonly --null-strings --global-table --hash-function-name=__cap_hash_name --lookup-function-name="__cap_lookup_name" -c -t -m20 $(INDENT) > $@
+-+	perl -e 'print "struct __cap_token_s { const char *name; int index; };\n%{\nstatic const struct __cap_token_s *__cap_lookup_name(const char *, unsigned int);\n%}\n%%\n"; while ($$l = <>) { $$l =~ s/[\{\"]//g; $$l =~ s/\}.*// ; print $$l; }' < $< | gperf --ignore-case --language=ANSI-C --readonly --null-strings --global-table --hash-function-name=__cap_hash_name --lookup-function-name="__cap_lookup_name" -c -t -m20 $(INDENT) > $@
+++	perl -e 'print "struct __cap_token_s { const char *name; int index; };\n%{\n#include <stdlib.h>\nstatic const struct __cap_token_s *__cap_lookup_name(const char *, size_t);\n%}\n%%\n"; while ($$l = <>) { $$l =~ s/[\{\"]//g; $$l =~ s/\}.*// ; print $$l; }' < $< | gperf --includes --ignore-case --language=ANSI-C --readonly --null-strings --global-table --hash-function-name=__cap_hash_name --lookup-function-name="__cap_lookup_name" -c -t -m20 $(INDENT) > $@
+  
+  cap_names.list.h: Makefile $(KERNEL_HEADERS)/linux/capability.h
+  	@echo "=> making $@ from $(KERNEL_HEADERS)/linux/capability.h"
+EOF
 	echo "fixing misbuilt libcap.pc #871714"
 	drop_privs patch -p1 <<'EOF'
 --- a/debian/rules
@@ -4337,6 +4469,45 @@ add_automatic libxdmcp
 add_automatic libxext
 buildenv_libxext() {
 	export xorg_cv_malloc0_returns_null=no
+}
+
+patch_libxml2() {
+	echo "fix libxml2 FTBFS with strict debhelper #876717"
+	drop_privs patch -p1 <<'EOF'
+--- a/debian/rules
++++ b/debian/rules
+@@ -32,7 +32,6 @@
+ TARGETS += udeb
+ else
+ $(if $(shell grep -q libxml2-udeb debian/control && echo yes),$(shell sed -i /libxml2-udeb/,\$$d debian/control))
+-export DH_OPTIONS = -Nlibxml2-udeb
+ endif
+ 
+ CONFIGURE_FLAGS := --disable-silent-rules --with-history --cache-file="$(CURDIR)/builddir/config.cache"
+@@ -117,18 +116,20 @@
+ 	dh_installchangelogs -k NEWS
+ 
+ override_dh_install-arch:
+-	dh_install -Npython-libxml2-dbg -Npython3-libxml2-dbg -Nlibxml2-udeb
++	dh_install -Npython-libxml2-dbg -Npython3-libxml2-dbg $(if $(WITH_UDEB),-Nlibxml2-udeb)
+ ifneq (,$(filter python-libxml2-dbg,$(DOPACKAGES)))
+ 	dh_install -ppython-libxml2-dbg --sourcedir=debian/tmp-dbg
+ endif
+ ifneq (,$(filter python3-libxml2-dbg,$(DOPACKAGES)))
+ 	dh_install -ppython3-libxml2-dbg --sourcedir=debian/tmp-dbg
+ endif
++ifneq ($(WITH_UDEB),)
+ 	dh_install -plibxml2-udeb --sourcedir=debian/tmp-udeb
++endif
+ 	sed -i -e 's,/lib/$(DEB_HOST_MULTIARCH),/lib,' debian/libxml2-dev/usr/bin/xml2-config
+ 
+ override_dh_strip:
+-	dh_strip -a --dbg-package=libxml2-dbg -Nlibxml2-udeb -Nlibxml2-utils -Nlibxml2-utils-dbg -Npython-libxml2 -Npython-libxml2-dbg -Npython3-libxml2 -Npython3-libxml2-dbg
++	dh_strip -a --dbg-package=libxml2-dbg $(if $(WITH_UDEB),-Nlibxml2-udeb) -Nlibxml2-utils -Npython-libxml2 -Npython-libxml2-dbg -Npython3-libxml2 -Npython3-libxml2-dbg
+ ifneq (,$(filter python-libxml2 python-libxml2-dbg,$(DOPACKAGES)))
+ 	dh_strip -ppython-libxml2 --dbg-package=python-libxml2-dbg
+ endif
+EOF
 }
 
 add_automatic libxmu
