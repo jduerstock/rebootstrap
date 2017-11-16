@@ -1638,9 +1638,9 @@ patch_gcc_7() {
  		$(call shlibdirs_to_search, \
  			$(subst gnat-$(GNAT_SONAME),gcc$(GCC_SONAME),$(p_lgnat)) \
 @@ -347,7 +347,7 @@
- 
- 	debian/dh_rmemptydirs -p$(p_gnat)
- 
+ 	dwz \
+ 	  $(d_gnat)/$(gcc_lexec_dir)/gnat1
+ endif
 -	dh_strip -p$(p_gnat)
 +	$(cross_strip) dh_strip -p$(p_gnat)
  	find $(d_gnat) -name '*.ali' | xargs chmod 444
@@ -2986,11 +2986,8 @@ else
 	drop_privs rm -Rf gcc2
 fi
 progress_mark "cross gcc stage2 build"
-build_libunwind_ia64() {
-	test "$HOST_ARCH" = ia64 || return 0
-	echo "building libunwind for ia64"
-	cross_build libunwind
-}
+
+cross_build libunwind
 
 if test "$(dpkg-architecture "-a$HOST_ARCH" -qDEB_HOST_ARCH_OS)" = hurd; then
 if test -f "$REPODIR/stamps/hurd_2"; then
